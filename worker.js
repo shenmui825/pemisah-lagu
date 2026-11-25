@@ -16,11 +16,16 @@ let kind = '', processor = null, session = null, provider = '';
 let modelBuf = null, modelUrl = '', fromCache = false;
 
 const post = (m, t) => self.postMessage(m, t || []);
+const errText = e => String((e && e.message) ? e.message : e).slice(0, 300);
 
 async function readModel(url, file) {
   const cache = await caches.open(CACHE);
   fromCache = false;
-  if (file) return await file.arrayBuffer();
+  if (file) {
+    const b = await file.arrayBuffer();
+    try { await cache.put(url, new Response(b.slice(0))); fromCache = true; } catch (e) {}
+    return b;
+  }
   const hit = await cache.match(url);
   if (hit) { fromCache = true; post({ type: 'status', text: 'Membaca model dari simpanan peranti…' }); return await hit.arrayBuffer(); }
 
@@ -41,6 +46,7 @@ async function readModel(url, file) {
   for (const c of chunks) { u8.set(c, o); o += c.length; }
   chunks.length = 0;
   if (total && loaded < total) throw new Error('Muat turun tidak lengkap, cuba lagi');
+  try { await cache.put(url, new Response(u8.buffer.slice(0))); fromCache = true; } catch (e) { /* storan penuh */ }
   return u8.buffer;
 }
 
@@ -73,22 +79,28 @@ async function load(k, url, file, forceWasm) {
   }
   post({ type: 'status', text: 'Menyediakan enjin AI…' });
   const order = forceWasm ? [['wasm']] : [['webgpu'], ['wasm']];
-  let last;
+  const errs = [];
   for (const eps of order) {
     try {
       await createSession(eps);
-      // simpan model dalam peranti hanya selepas terbukti sah
-      if (!fromCache) {
-        try { await (await caches.open(CACHE)).put(url, new Response(modelBuf.slice(0))); fromCache = true; } catch (e) { /* storan penuh */ }
-      }
       post({ type: 'ready', provider });
-      return;
-    } catch (e) { last = e; processor = null; session = null; }
+      return true;
+    } catch (e) {
+      errs.push(eps[0] + ': ' + errText(e)); processor = null; session = null;
+      if (eps[0] === 'webgpu') {
+        // enjin WASM yang sama mungkin rosak selepas WebGPU gagal: main akan mula semula worker
+        post({ type: 'needcpu', reason: 'sedia WebGPU: ' + errText(e) });
+        return false;
+      }
+    }
   }
+  const msg = errs.join(' | ');
   // model rosak: buang supaya muat turun semula pada percubaan seterusnya
-  try { await (await caches.open(CACHE)).delete(url); } catch (e) {}
-  modelBuf = null; modelUrl = ''; fromCache = false;
-  throw last || new Error('Gagal menyediakan enjin AI');
+  if (/protobuf|pars|invalid model|Failed to load model/i.test(msg)) {
+    try { await (await caches.open(CACHE)).delete(url); } catch (e) {}
+    modelBuf = null; modelUrl = ''; fromCache = false;
+  }
+  throw new Error('Gagal menyediakan enjin AI (' + msg + ')');
 }
 
 // ---- pemisahan 6 stem: overlap-add dengan tetingkap ----
@@ -138,16 +150,11 @@ async function separate6(left, right) {
 }
 
 async function runSeparate(left, right) {
-  const run = () => (kind === 'm4' ? processor.separate(left, right) : separate6(left, right));
   try {
-    return await run();
+    return await (kind === 'm4' ? processor.separate(left, right) : separate6(left, right));
   } catch (e) {
-    if (provider !== 'webgpu') throw e;
-    // WebGPU gagal semasa larian → ulang dengan CPU (WASM)
-    post({ type: 'status', text: 'WebGPU bermasalah, tukar ke mod CPU (lebih perlahan)…' });
-    await createSession(['wasm']);
-    post({ type: 'ready', provider });
-    return await run();
+    if (provider === 'webgpu') { post({ type: 'needcpu', reason: 'larian WebGPU: ' + errText(e) }); return null; }
+    throw new Error('Larian (' + provider + '): ' + errText(e));
   }
 }
 
@@ -160,8 +167,11 @@ self.onmessage = async ev => {
     } else if (m.type === 'load') {
       await load(m.kind, m.url, m.file, m.forceWasm);
     } else if (m.type === 'separate') {
-      if (!ready() || kind !== m.kind || (m.forceWasm && provider !== 'wasm')) await load(m.kind, m.url, null, !!m.forceWasm);
+      if (!ready() || kind !== m.kind || (m.forceWasm && provider !== 'wasm')) {
+        if (!(await load(m.kind, m.url, null, !!m.forceWasm))) return;
+      }
       const res = await runSeparate(m.left, m.right);
+      if (!res) return;
       const out = {}, tr = [];
       for (const k of Object.keys(res)) {
         out[k] = res[k];

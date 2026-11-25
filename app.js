@@ -41,6 +41,24 @@ const setBar = p => {
 const mb = n => (n / 1048576).toFixed(0) + 'MB';
 
 // ---------- worker ----------
+let lastJob = null;       // untuk ulang dalam mod CPU
+function sendSeparate(forceWasm) {
+  const left = song.left.slice(), right = song.right.slice();
+  worker.postMessage({ type: 'separate', kind, url: MODEL_URL(), left, right, forceWasm }, [left.buffer, right.buffer]);
+}
+function retryCpu(reason) {
+  worker.terminate();
+  el.forceCpu.checked = true;
+  setBar(null);
+  setStatus('WebGPU gagal, mula semula dalam mod CPU (lebih perlahan)… [' + reason.slice(0, 160) + ']');
+  startWorker();
+  if (!lastJob) { workerBusy = false; return; }
+  if (lastJob.type === 'separate') { setBar(0); sendSeparate(true); }
+  else worker.postMessage({ type: 'load', kind, url: MODEL_URL(), file: lastJob.file, forceWasm: true });
+}
+const friendly = m => /Aborted|memory|alloc/i.test(m)
+  ? m + '\n\nKemungkinan memori tak cukup. Cuba: lagu lebih pendek, pilih model 4 stem, atau nyahtanda "Paksa mod CPU" supaya guna WebGPU.'
+  : m;
 function startWorker() {
   worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
   worker.onmessage = onWorker;
@@ -72,10 +90,11 @@ function onWorker(ev) {
       setBar(m.p);
       setStatus('Mengasingkan… ' + Math.round(m.p * 100) + '% (bahagian ' + m.seg + '/' + m.total + ')');
       break;
+    case 'needcpu': retryCpu(m.reason); break;
     case 'done': finishSeparate(m.stems); break;
     case 'error':
       workerBusy = false; setBar(null); setStatus('');
-      showErr('Ralat: ' + m.message);
+      showErr('Ralat: ' + friendly(m.message));
       el.sep.disabled = !song;
       releaseWake();
       break;
@@ -114,6 +133,7 @@ el.modelFile.onchange = () => {
   const f = el.modelFile.files[0];
   if (!f) return;
   setStatus('Memuatkan model dari fail…'); showErr('');
+  lastJob = { type: 'load', file: f };
   worker.postMessage({ type: 'load', kind, url: MODEL_URL(), file: f, forceWasm: el.forceCpu.checked });
 };
 
@@ -127,9 +147,8 @@ el.sep.onclick = async () => {
   workerBusy = true; el.sep.disabled = true;
   setBar(0); setStatus('Bermula…');
   await takeWake();
-  // salin supaya lagu asal kekal untuk ulangan
-  const left = song.left.slice(), right = song.right.slice();
-  worker.postMessage({ type: 'separate', kind, url: MODEL_URL(), left, right, forceWasm: el.forceCpu.checked }, [left.buffer, right.buffer]);
+  lastJob = { type: 'separate' };
+  sendSeparate(el.forceCpu.checked);
 };
 
 function finishSeparate(res) {
