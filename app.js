@@ -1,6 +1,6 @@
 import { effectiveGains, mixDown, encodeWav, encodeMp3, peaks, fmtTime, safeName } from './audio-utils.js';
 
-const VERSION = 'v6';
+const VERSION = 'v7';
 const SR = 44100;
 const NAMES = { vocals: 'Vokal', drums: 'Dram', bass: 'Bass', guitar: 'Gitar', piano: 'Piano', other: 'Lain-lain' };
 const MODELS = {
@@ -60,11 +60,13 @@ function retryCpu(reason) {
   if (lastJob.type === 'separate') { setBar(0); sendSeparate(true); }
   else worker.postMessage({ type: 'load', kind, url: MODEL_URL(), file: lastJob.file, forceWasm: true });
 }
-const friendly = m => /\(wasm: \d+\)|^\d+$/.test(m)
-  ? m + '\n\nEnjin CPU berhenti tanpa mesej (kemungkinan model tak serasi atau memori tak cukup).' + (gpuReason ? '\nPunca WebGPU gagal: ' + gpuReason : '')
-  : /Aborted|memory|alloc/i.test(m)
-  ? m + '\n\nKemungkinan memori tak cukup. Cuba: lagu lebih pendek, pilih model 4 stem, atau nyahtanda "Paksa mod CPU" supaya guna WebGPU.'
-  : m;
+const friendly = m => {
+  let t = m;
+  if (/\(wasm: \d+\)|^\d+$/.test(m)) t += '\n\nEnjin CPU berhenti tanpa mesej (kemungkinan model tak serasi atau memori tak cukup).';
+  else if (/Aborted|memory|alloc/i.test(m)) t += '\n\nKemungkinan memori tak cukup atau model tak serasi dengan enjin.';
+  if (gpuReason) t += '\n\nPunca WebGPU gagal: ' + gpuReason;
+  return t + '\n\nCuba model 4 stem (pilihan di bahagian Model AI) untuk bandingkan.';
+};
 function startWorker() {
   worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
   worker.onmessage = onWorker;
