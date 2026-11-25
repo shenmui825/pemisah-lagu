@@ -1,5 +1,5 @@
 // Cache app shell + pustaka supaya boleh guna tanpa internet. Model disimpan berasingan (Cache API dalam worker).
-const V = 'pemisah-app-v7';
+const V = 'pemisah-app-v8';
 const SHELL = ['./', 'index.html', 'app.js', 'audio-utils.js', 'worker.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
   'lib/lame.min.js', 'lib/ort.webgpu.min.mjs', 'lib/demucs/processor.js', 'lib/demucs/fft.js', 'lib/demucs/constants.js'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });

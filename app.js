@@ -1,10 +1,10 @@
 import { effectiveGains, mixDown, encodeWav, encodeMp3, peaks, fmtTime, safeName } from './audio-utils.js';
 
-const VERSION = 'v7';
+const VERSION = 'v8';
 const SR = 44100;
 const NAMES = { vocals: 'Vokal', drums: 'Dram', bass: 'Bass', guitar: 'Gitar', piano: 'Piano', other: 'Lain-lain' };
 const MODELS = {
-  m6: { label: '6 stem', size: '258MB', url: 'https://huggingface.co/adowu/htdemucs-6s-onnx/resolve/main/htdemucs_6s.onnx',
+  m6: { label: '6 stem', size: '285MB', url: 'https://huggingface.co/kramp/htdemucs-6s-webgpu-onnx/resolve/main/htdemucs_6s.onnx',
         keys: ['vocals', 'drums', 'bass', 'guitar', 'piano', 'other'] },
   m4: { label: '4 stem', size: '172MB', url: 'https://huggingface.co/timcsy/demucs-web-onnx/resolve/main/htdemucs_embedded.onnx',
         keys: ['vocals', 'drums', 'bass', 'other'] },
