@@ -67,12 +67,18 @@ a{color:var(--acc)}
 
   <div class="card" id="cardModel">
     <h2>Model AI</h2>
+    <div class="row" style="margin-bottom:8px">
+      <label><input type="radio" name="mk" value="m6" checked> 6 stem (vokal, dram, bass, gitar, piano, lain-lain)</label>
+      <label><input type="radio" name="mk" value="m4"> 4 stem (gitar &amp; piano dalam “lain-lain”)</label>
+    </div>
     <div class="dim" id="modelInfo">Menyemak…</div>
     <details style="margin-top:8px">
       <summary>Muat turun gagal? Guna fail model sendiri</summary>
-      <p class="dim">Model <code>htdemucs_embedded.onnx</code> (~172MB) boleh dimuat turun melalui pelayar dari
-      <a href="https://huggingface.co/timcsy/demucs-web-onnx" target="_blank" rel="noopener">huggingface.co/timcsy/demucs-web-onnx</a>,
-      kemudian pilih fail itu di sini.</p>
+      <p class="dim">Fail model boleh dimuat turun melalui pelayar: 6 stem <code>htdemucs_6s_fp16weights.onnx</code> dari
+      <a href="https://huggingface.co/adowu/htdemucs-6s-onnx" target="_blank" rel="noopener">adowu/htdemucs-6s-onnx</a>,
+      4 stem <code>htdemucs_embedded.onnx</code> dari
+      <a href="https://huggingface.co/timcsy/demucs-web-onnx" target="_blank" rel="noopener">timcsy/demucs-web-onnx</a>.
+      Pilih jenis model di atas dahulu, kemudian pilih fail itu di sini.</p>
       <button id="btnModelFile">Pilih fail model</button>
       <input type="file" id="modelFile" accept=".onnx" hidden>
     </details>
@@ -94,13 +100,13 @@ a{color:var(--acc)}
     <div class="row chips" style="margin:12px 0 4px">
       <span class="dim">Cepat:</span>
       <button data-p="all">Semua</button>
-      <button data-p="nogtr">Tanpa lain-lain (gitar)</button>
+      <button data-p="nogtr">Tanpa gitar</button>
       <button data-p="novox">Tanpa vokal</button>
       <button data-p="nodrum">Tanpa dram</button>
       <button data-p="vox">Vokal sahaja</button>
     </div>
     <div id="stems"></div>
-    <p class="dim" style="margin:8px 0 0">Gitar, piano dan alat lain berada dalam “Lain-lain”. Model ini ada 4 stem sahaja.</p>
+    <p class="dim hidden" id="stemNote" style="margin:8px 0 0">Mod 4 stem: gitar dan piano berada dalam “Lain-lain”.</p>
   </div>
 
   <div class="card hidden" id="cardExport">

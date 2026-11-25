@@ -1,13 +1,16 @@
 import { effectiveGains, mixDown, encodeWav, encodeMp3, peaks, fmtTime, safeName } from './audio-utils.js';
 
-const MODEL_URL = 'https://huggingface.co/timcsy/demucs-web-onnx/resolve/main/htdemucs_embedded.onnx';
 const SR = 44100;
-const STEMS = [
-  { key: 'vocals', name: 'Vokal' },
-  { key: 'drums', name: 'Dram' },
-  { key: 'bass', name: 'Bass' },
-  { key: 'other', name: 'Lain-lain (gitar, piano…)' },
-];
+const NAMES = { vocals: 'Vokal', drums: 'Dram', bass: 'Bass', guitar: 'Gitar', piano: 'Piano', other: 'Lain-lain' };
+const MODELS = {
+  m6: { label: '6 stem', size: '136MB', url: 'https://huggingface.co/adowu/htdemucs-6s-onnx/resolve/main/htdemucs_6s_fp16weights.onnx',
+        keys: ['vocals', 'drums', 'bass', 'guitar', 'piano', 'other'] },
+  m4: { label: '4 stem', size: '172MB', url: 'https://huggingface.co/timcsy/demucs-web-onnx/resolve/main/htdemucs_embedded.onnx',
+        keys: ['vocals', 'drums', 'bass', 'other'] },
+};
+let kind = 'm6';
+let STEMS = MODELS[kind].keys.map(k => ({ key: k, name: NAMES[k] }));
+const MODEL_URL = () => MODELS[kind].url;
 
 const $ = s => document.querySelector(s);
 const el = {
@@ -22,7 +25,7 @@ const el = {
 let worker, workerBusy = false;
 let song = null;            // {left,right,name}
 let stems = null;           // [{left,right}] ikut urutan STEMS
-let states = STEMS.map(() => ({ vol: 1, mute: false, solo: false }));
+let states = [];
 let ac = null, gains = [], buffers = [], sources = [];
 let playing = false, startAt = 0, offsetAt = 0, pos = 0, dur = 0;
 let loopA = null, loopB = null, loopOn = false;
@@ -42,16 +45,20 @@ function startWorker() {
   worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
   worker.onmessage = onWorker;
   worker.onerror = e => { workerBusy = false; showErr('Ralat worker: ' + (e.message || 'tidak diketahui')); el.sep.disabled = !song; };
-  worker.postMessage({ type: 'check', url: MODEL_URL });
+  checkCached();
 }
-let pendingResolve = null;
+function checkCached() { worker.postMessage({ type: 'check', url: MODEL_URL() }); }
+document.querySelectorAll('input[name=mk]').forEach(r => r.onchange = () => {
+  if (workerBusy) { document.querySelector(`input[name=mk][value=${kind}]`).checked = true; return; }
+  kind = r.value; el.modelInfo.textContent = 'Menyemak…'; checkCached();
+});
 function onWorker(ev) {
   const m = ev.data;
   switch (m.type) {
     case 'cached':
       el.modelInfo.textContent = m.value
         ? 'Model sudah ada dalam peranti. Boleh guna tanpa internet.'
-        : 'Model belum dimuat turun. Kali pertama akan memuat turun ~172MB (guna Wi-Fi), selepas itu disimpan dalam peranti.';
+        : 'Model belum dimuat turun. Kali pertama akan memuat turun ~' + MODELS[kind].size + ' (guna Wi-Fi), selepas itu disimpan dalam peranti.';
       break;
     case 'status': setStatus(m.text); break;
     case 'dl':
@@ -107,7 +114,7 @@ el.modelFile.onchange = () => {
   const f = el.modelFile.files[0];
   if (!f) return;
   setStatus('Memuatkan model dari fail…'); showErr('');
-  worker.postMessage({ type: 'load', url: MODEL_URL, file: f, forceWasm: el.forceCpu.checked });
+  worker.postMessage({ type: 'load', kind, url: MODEL_URL(), file: f, forceWasm: el.forceCpu.checked });
 };
 
 // ---------- pisah ----------
@@ -122,11 +129,12 @@ el.sep.onclick = async () => {
   await takeWake();
   // salin supaya lagu asal kekal untuk ulangan
   const left = song.left.slice(), right = song.right.slice();
-  worker.postMessage({ type: 'separate', url: MODEL_URL, left, right, forceWasm: el.forceCpu.checked }, [left.buffer, right.buffer]);
+  worker.postMessage({ type: 'separate', kind, url: MODEL_URL(), left, right, forceWasm: el.forceCpu.checked }, [left.buffer, right.buffer]);
 };
 
 function finishSeparate(res) {
   workerBusy = false; releaseWake();
+  STEMS = MODELS[kind].keys.map(k => ({ key: k, name: NAMES[k] }));
   stems = STEMS.map(s => res[s.key]);
   setBar(null); setStatus('Siap. Mixer di bawah.');
   el.sep.disabled = false;
@@ -150,6 +158,7 @@ function setupPlayer() {
   peakData = peaks(all.left, all.right, 800);
   el.tTot.textContent = fmtTime(dur);
   buildMixerUI(); applyGains(); updateLoopUI();
+  $('#stemNote').classList.toggle('hidden', kind !== 'm4');
   el.player.classList.remove('hidden'); el.exp.classList.remove('hidden');
   el.player.scrollIntoView({ behavior: 'smooth', block: 'start' });
   cancelAnimationFrame(raf); raf = requestAnimationFrame(tick);
@@ -188,7 +197,7 @@ document.querySelectorAll('[data-p]').forEach(b => b.onclick = () => {
   const p = b.dataset.p;
   states.forEach(s => { s.mute = false; s.solo = false; });
   const idx = k => STEMS.findIndex(s => s.key === k);
-  if (p === 'nogtr') states[idx('other')].mute = true;
+  if (p === 'nogtr') states[idx(idx('guitar') >= 0 ? 'guitar' : 'other')].mute = true;
   if (p === 'novox') states[idx('vocals')].mute = true;
   if (p === 'nodrum') states[idx('drums')].mute = true;
   if (p === 'vox') states[idx('vocals')].solo = true;
