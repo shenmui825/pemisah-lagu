@@ -1,15 +1,17 @@
 import { effectiveGains, mixDown, encodeWav, encodeMp3, peaks, fmtTime, safeName } from './audio-utils.js';
 
-const VERSION = 'v9';
+const VERSION = 'v10';
 const SR = 44100;
 const NAMES = { vocals: 'Vokal', drums: 'Dram', bass: 'Bass', guitar: 'Gitar', piano: 'Piano', other: 'Lain-lain' };
 const MODELS = {
   m6: { label: '6 stem', size: '285MB', url: 'https://huggingface.co/kramp/htdemucs-6s-webgpu-onnx/resolve/main/htdemucs_6s.onnx',
         keys: ['vocals', 'drums', 'bass', 'guitar', 'piano', 'other'] },
+  m6f: { label: '6 stem laju', size: '115MB', url: 'https://huggingface.co/leejsool/dsmuse-models/resolve/main/htdemucs_6s.onnx',
+        keys: ['vocals', 'drums', 'bass', 'guitar', 'piano', 'other'] },
   m4: { label: '4 stem', size: '172MB', url: 'https://huggingface.co/timcsy/demucs-web-onnx/resolve/main/htdemucs_embedded.onnx',
         keys: ['vocals', 'drums', 'bass', 'other'] },
 };
-let kind = 'm6';
+let kind = 'm6f';
 let STEMS = MODELS[kind].keys.map(k => ({ key: k, name: NAMES[k] }));
 const MODEL_URL = () => MODELS[kind].url;
 
@@ -44,6 +46,7 @@ const setBar = p => {
 const mb = n => (n / 1048576).toFixed(0) + 'MB';
 
 // ---------- worker ----------
+let tStart = 0;
 let lastJob = null;       // untuk ulang dalam mod CPU
 let gpuReason = '';
 function sendSeparate(forceWasm) {
@@ -97,7 +100,11 @@ function onWorker(ev) {
       break;
     case 'progress':
       setBar(m.p);
-      setStatus('Mengasingkan… ' + Math.round(m.p * 100) + '% (bahagian ' + m.seg + '/' + m.total + ')');
+      {
+        const el_s = (Date.now() - tStart) / 1000, left = m.p > 0 ? el_s / m.p * (1 - m.p) : 0;
+        const fmt = s => (s >= 60 ? Math.floor(s / 60) + ' min ' : '') + Math.round(s % 60) + ' s';
+        setStatus('Mengasingkan… ' + Math.round(m.p * 100) + '% (bahagian ' + m.seg + '/' + m.total + ') · ' + (el_s / m.seg).toFixed(1) + ' s/bahagian · baki ~' + fmt(left));
+      }
       break;
     case 'needcpu': retryCpu(m.reason); break;
     case 'done': finishSeparate(m.stems); break;
@@ -156,7 +163,7 @@ el.sep.onclick = async () => {
   workerBusy = true; el.sep.disabled = true;
   setBar(0); setStatus('Bermula…');
   await takeWake();
-  lastJob = { type: 'separate' }; gpuReason = '';
+  lastJob = { type: 'separate' }; gpuReason = ''; tStart = Date.now();
   sendSeparate(el.forceCpu.checked);
 };
 
@@ -164,7 +171,7 @@ function finishSeparate(res) {
   workerBusy = false; releaseWake();
   raw = res; layout = '6';
   document.querySelector('input[name=lay][value="6"]').checked = true;
-  $('#layoutRow').classList.toggle('hidden', kind !== 'm6');
+  $('#layoutRow').classList.toggle('hidden', !MODELS[kind].keys.includes('guitar'));
   applyLayout();
   setBar(null); setStatus('Siap. Mixer di bawah.');
   el.sep.disabled = false;
@@ -174,7 +181,7 @@ function finishSeparate(res) {
 // Susun stem daripada hasil mentah. Susunan 5 stem: Gitar 1 = saluran kiri, Gitar 2 = saluran kanan
 // (hanya bermakna jika gitar dalam lagu itu di-pan kiri/kanan). Jumlah semua stem = asal.
 function applyLayout() {
-  if (kind === 'm6' && layout === '5') {
+  if (MODELS[kind].keys.includes('guitar') && layout === '5') {
     const n = raw.vocals.left.length, zero = new Float32Array(n);
     const mixL = new Float32Array(n), mixR = new Float32Array(n);
     for (const k of ['bass', 'piano', 'other']) {
@@ -214,7 +221,7 @@ function setupPlayer(scroll) {
   peakData = peaks(all.left, all.right, 800);
   el.tTot.textContent = fmtTime(dur);
   buildMixerUI(); applyGains(); updateLoopUI();
-  $('#stemNote').classList.toggle('hidden', kind !== 'm4');
+  $('#stemNote').classList.toggle('hidden', MODELS[kind].keys.includes('guitar'));
   el.player.classList.remove('hidden'); el.exp.classList.remove('hidden');
   if (scroll) el.player.scrollIntoView({ behavior: 'smooth', block: 'start' });
   cancelAnimationFrame(raf); raf = requestAnimationFrame(tick);

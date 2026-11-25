@@ -1,9 +1,10 @@
 // Worker: muat model (ONNX) dan jalankan pemisahan di luar thread UI.
 // Dua jenis model:
-//  m4 = htdemucs 4 stem (timcsy, STFT dikira di luar graf oleh DemucsProcessor)
+//  m4  = htdemucs 4 stem (timcsy, STFT dikira di luar graf oleh DemucsProcessor)
+//  m6f = htdemucs 6 stem format yang sama (mix+mag → spec_out+time_out), STFT di JS: lebih laju
 //  m6 = htdemucs 6 stem (adowu, input gelombang `mix`, output `stems` [1,6,2,T])
 import * as ort from './lib/ort.webgpu.min.mjs';
-import { DemucsProcessor } from './lib/demucs/processor.js';
+import { DemucsProcessor } from './lib/demucs/processor-k.js';
 
 const CACHE = 'pemisah-model-v1';
 const T = 343980;                       // panjang segmen model (7.8s @ 44.1k)
@@ -52,9 +53,10 @@ async function readModel(url, file) {
 
 async function createSession(eps) {
   session = null; processor = null;
-  if (kind === 'm4') {
+  if (kind !== 'm6') {
     processor = new DemucsProcessor({
       ort,
+      tracks: kind === 'm6f' ? M6_KEYS : undefined,
       sessionOptions: { executionProviders: eps },
       onProgress: p => post({ type: 'progress', p: p.progress, seg: p.currentSegment, total: p.totalSegments }),
     });
@@ -68,7 +70,7 @@ async function createSession(eps) {
   provider = eps[0];
 }
 
-const ready = () => (kind === 'm4' ? !!processor : !!session);
+const ready = () => (kind !== 'm6' ? !!processor : !!session);
 
 const OLD_URLS = ['https://huggingface.co/adowu/htdemucs-6s-onnx/resolve/main/htdemucs_6s_fp16weights.onnx', 'https://huggingface.co/adowu/htdemucs-6s-onnx/resolve/main/htdemucs_6s.onnx'];
 async function load(k, url, file, forceWasm) {
@@ -153,7 +155,7 @@ async function separate6(left, right) {
 
 async function runSeparate(left, right) {
   try {
-    return await (kind === 'm4' ? processor.separate(left, right) : separate6(left, right));
+    return await (kind !== 'm6' ? processor.separate(left, right) : separate6(left, right));
   } catch (e) {
     if (provider === 'webgpu') { post({ type: 'needcpu', reason: 'larian WebGPU: ' + errText(e) }); return null; }
     throw new Error('Larian (' + provider + '): ' + errText(e));
