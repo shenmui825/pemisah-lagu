@@ -1,5 +1,6 @@
 import { effectiveGains, mixDown, encodeWav, encodeMp3, peaks, fmtTime, safeName } from './audio-utils.js';
 
+const VERSION = 'v5';
 const SR = 44100;
 const NAMES = { vocals: 'Vokal', drums: 'Dram', bass: 'Bass', guitar: 'Gitar', piano: 'Piano', other: 'Lain-lain' };
 const MODELS = {
@@ -32,7 +33,8 @@ let loopA = null, loopB = null, loopOn = false;
 let peakData = null, raf = 0, wake = null;
 
 // ---------- util UI ----------
-const showErr = m => { el.err.textContent = m || ''; el.err.classList.toggle('hidden', !m); };
+const diag = () => [VERSION, kind, 'WebGPU ' + (navigator.gpu ? 'ada' : 'tiada'), 'RAM ' + (navigator.deviceMemory || '?') + 'GB', 'CPU ' + (navigator.hardwareConcurrency || '?')].join(' · ');
+const showErr = m => { el.err.textContent = m ? m + '\n[' + diag() + ']' : ''; el.err.classList.toggle('hidden', !m); };
 const setStatus = t => { el.status.textContent = t || ''; };
 const setBar = p => {
   el.barWrap.classList.toggle('hidden', p == null);
@@ -352,5 +354,6 @@ el.mp3.onclick = () => exportMix('mp3');
 el.wav.onclick = () => exportMix('wav');
 
 // ---------- mula ----------
+$('#ver').textContent = VERSION;
 startWorker();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
