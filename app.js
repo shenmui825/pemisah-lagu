@@ -122,7 +122,7 @@ el.sep.onclick = async () => {
   await takeWake();
   // salin supaya lagu asal kekal untuk ulangan
   const left = song.left.slice(), right = song.right.slice();
-  worker.postMessage({ type: 'separate', url: MODEL_URL, left, right }, [left.buffer, right.buffer]);
+  worker.postMessage({ type: 'separate', url: MODEL_URL, left, right, forceWasm: el.forceCpu.checked }, [left.buffer, right.buffer]);
 };
 
 function finishSeparate(res) {

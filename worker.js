@@ -98,7 +98,7 @@ self.onmessage = async ev => {
     } else if (m.type === 'load') {
       await load(m.url, m.file, m.forceWasm);
     } else if (m.type === 'separate') {
-      if (!processor) await load(m.url, null, false);
+      if (!processor || (m.forceWasm && provider !== 'wasm')) await load(m.url, null, !!m.forceWasm);
       const res = await runSeparate(m.left, m.right);
       const out = {}, tr = [];
       for (const k of Object.keys(res)) {
