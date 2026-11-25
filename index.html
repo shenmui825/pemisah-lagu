@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1a1c">
+<title>Pemisah Lagu</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>
+:root{--bg:#0f1a1c;--card:#16262a;--card2:#1c3237;--line:#27444a;--txt:#e8f3f2;--dim:#8fb0b0;--acc:#2dd4bf;--acc2:#a3e635;--bad:#fb7185}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:env(safe-area-inset-top) 0 40px}
+.wrap{max-width:860px;margin:0 auto;padding:14px}
+h1{font-size:22px;margin:6px 0 2px;letter-spacing:.3px}
+h1 span{color:var(--acc)}
+.sub{color:var(--dim);margin:0 0 14px;font-size:13px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+.card h2{font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--acc);margin:0 0 10px}
+button,.btn{background:var(--card2);color:var(--txt);border:1px solid var(--line);border-radius:10px;padding:10px 14px;font:inherit;cursor:pointer;touch-action:manipulation}
+button:hover{border-color:var(--acc)}
+button:disabled{opacity:.4;cursor:not-allowed}
+button.pri{background:linear-gradient(90deg,var(--acc),var(--acc2));color:#05201c;border:0;font-weight:700}
+button.on{background:var(--acc);color:#05201c;border-color:var(--acc)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.dim{color:var(--dim);font-size:13px}
+.err{color:var(--bad);font-size:13px;margin-top:8px;white-space:pre-wrap}
+.bar{height:10px;background:var(--bg);border-radius:6px;overflow:hidden;margin-top:10px;border:1px solid var(--line)}
+.bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width .2s}
+.hidden{display:none!important}
+#drop{border:2px dashed var(--line);border-radius:12px;padding:22px;text-align:center;color:var(--dim)}
+#drop.over{border-color:var(--acc);color:var(--acc)}
+canvas{width:100%;height:84px;display:block;background:var(--bg);border-radius:10px;border:1px solid var(--line);touch-action:none;cursor:pointer}
+.time{display:flex;justify-content:space-between;color:var(--dim);font-size:13px;margin:6px 2px 10px;font-variant-numeric:tabular-nums}
+.stem{display:grid;grid-template-columns:1fr auto auto;gap:8px 10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.stem:first-of-type{border-top:0}
+.stem .nm{font-weight:600}
+.stem input[type=range]{grid-column:1/-1;width:100%;accent-color:var(--acc)}
+.stem button{padding:6px 12px;min-width:44px}
+.stem.muted .nm{opacity:.45;text-decoration:line-through}
+details summary{cursor:pointer;color:var(--dim)}
+a{color:var(--acc)}
+.chips button{padding:8px 12px;font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Pemisah <span>Lagu</span></h1>
+  <p class="sub">Asingkan vokal, dram, bass dan lain-lain daripada lagu kau. Semua proses dalam peranti ini, lagu tak dimuat naik ke mana-mana.</p>
+
+  <div class="card" id="cardLoad">
+    <h2>1. Pilih lagu</h2>
+    <div id="drop">
+      <div>Seret fail lagu ke sini, atau</div>
+      <div style="margin-top:10px"><button class="pri" id="btnPick">Pilih fail MP3 / audio</button></div>
+      <input type="file" id="file" accept="audio/*,.mp3,.m4a,.wav,.flac,.ogg" hidden>
+    </div>
+    <div class="dim" id="fileInfo" style="margin-top:10px"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="pri" id="btnSep" disabled>Asingkan sekarang</button>
+    </div>
+    <div class="bar hidden" id="barWrap"><i id="bar"></i></div>
+    <div class="dim" id="status" style="margin-top:8px"></div>
+    <div class="err hidden" id="err"></div>
+  </div>
+
+  <div class="card" id="cardModel">
+    <h2>Model AI</h2>
+    <div class="dim" id="modelInfo">Menyemak…</div>
+    <details style="margin-top:8px">
+      <summary>Muat turun gagal? Guna fail model sendiri</summary>
+      <p class="dim">Model <code>htdemucs_embedded.onnx</code> (~172MB) boleh dimuat turun melalui pelayar dari
+      <a href="https://huggingface.co/timcsy/demucs-web-onnx" target="_blank" rel="noopener">huggingface.co/timcsy/demucs-web-onnx</a>,
+      kemudian pilih fail itu di sini.</p>
+      <button id="btnModelFile">Pilih fail model</button>
+      <input type="file" id="modelFile" accept=".onnx" hidden>
+    </details>
+    <label class="dim" style="display:block;margin-top:8px"><input type="checkbox" id="forceCpu"> Paksa mod CPU (guna jika WebGPU hasilkan bunyi rosak)</label>
+  </div>
+
+  <div class="card hidden" id="cardPlayer">
+    <h2>2. Main &amp; campur</h2>
+    <canvas id="wave" width="1600" height="168"></canvas>
+    <div class="time"><span id="tNow">0:00</span><span id="tLoop"></span><span id="tTot">0:00</span></div>
+    <div class="row">
+      <button class="pri" id="btnPlay">▶ Main</button>
+      <button id="btnStop">⏹</button>
+      <button id="btnA">Tanda A</button>
+      <button id="btnB">Tanda B</button>
+      <button id="btnLoop">Ulang A–B</button>
+      <button id="btnClr">Kosongkan</button>
+    </div>
+    <div class="row chips" style="margin:12px 0 4px">
+      <span class="dim">Cepat:</span>
+      <button data-p="all">Semua</button>
+      <button data-p="nogtr">Tanpa lain-lain (gitar)</button>
+      <button data-p="novox">Tanpa vokal</button>
+      <button data-p="nodrum">Tanpa dram</button>
+      <button data-p="vox">Vokal sahaja</button>
+    </div>
+    <div id="stems"></div>
+    <p class="dim" style="margin:8px 0 0">Gitar, piano dan alat lain berada dalam “Lain-lain”. Model ini ada 4 stem sahaja.</p>
+  </div>
+
+  <div class="card hidden" id="cardExport">
+    <h2>3. Simpan</h2>
+    <div class="row">
+      <button class="pri" id="btnMp3">Simpan campuran semasa (MP3)</button>
+      <button id="btnWav">Campuran (WAV)</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <span class="dim">Stem berasingan (WAV):</span>
+      <span id="stemBtns" class="row"></span>
+    </div>
+    <div class="dim" id="expStatus" style="margin-top:8px"></div>
+  </div>
+
+  <p class="dim" style="text-align:center;margin-top:18px">Enjin: Demucs v4 (Meta, MIT) · ONNX Runtime Web. Untuk kegunaan peribadi.</p>
+</div>
+<script src="lib/lame.min.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
