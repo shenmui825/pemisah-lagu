@@ -1,10 +1,10 @@
 import { effectiveGains, mixDown, encodeWav, encodeMp3, peaks, fmtTime, safeName } from './audio-utils.js';
 
-const VERSION = 'v5';
+const VERSION = 'v6';
 const SR = 44100;
 const NAMES = { vocals: 'Vokal', drums: 'Dram', bass: 'Bass', guitar: 'Gitar', piano: 'Piano', other: 'Lain-lain' };
 const MODELS = {
-  m6: { label: '6 stem', size: '136MB', url: 'https://huggingface.co/adowu/htdemucs-6s-onnx/resolve/main/htdemucs_6s_fp16weights.onnx',
+  m6: { label: '6 stem', size: '258MB', url: 'https://huggingface.co/adowu/htdemucs-6s-onnx/resolve/main/htdemucs_6s.onnx',
         keys: ['vocals', 'drums', 'bass', 'guitar', 'piano', 'other'] },
   m4: { label: '4 stem', size: '172MB', url: 'https://huggingface.co/timcsy/demucs-web-onnx/resolve/main/htdemucs_embedded.onnx',
         keys: ['vocals', 'drums', 'bass', 'other'] },
@@ -44,11 +44,13 @@ const mb = n => (n / 1048576).toFixed(0) + 'MB';
 
 // ---------- worker ----------
 let lastJob = null;       // untuk ulang dalam mod CPU
+let gpuReason = '';
 function sendSeparate(forceWasm) {
   const left = song.left.slice(), right = song.right.slice();
   worker.postMessage({ type: 'separate', kind, url: MODEL_URL(), left, right, forceWasm }, [left.buffer, right.buffer]);
 }
 function retryCpu(reason) {
+  gpuReason = reason;
   worker.terminate();
   el.forceCpu.checked = true;
   setBar(null);
@@ -58,7 +60,9 @@ function retryCpu(reason) {
   if (lastJob.type === 'separate') { setBar(0); sendSeparate(true); }
   else worker.postMessage({ type: 'load', kind, url: MODEL_URL(), file: lastJob.file, forceWasm: true });
 }
-const friendly = m => /Aborted|memory|alloc/i.test(m)
+const friendly = m => /\(wasm: \d+\)|^\d+$/.test(m)
+  ? m + '\n\nEnjin CPU berhenti tanpa mesej (kemungkinan model tak serasi atau memori tak cukup).' + (gpuReason ? '\nPunca WebGPU gagal: ' + gpuReason : '')
+  : /Aborted|memory|alloc/i.test(m)
   ? m + '\n\nKemungkinan memori tak cukup. Cuba: lagu lebih pendek, pilih model 4 stem, atau nyahtanda "Paksa mod CPU" supaya guna WebGPU.'
   : m;
 function startWorker() {
@@ -149,7 +153,7 @@ el.sep.onclick = async () => {
   workerBusy = true; el.sep.disabled = true;
   setBar(0); setStatus('Bermula…');
   await takeWake();
-  lastJob = { type: 'separate' };
+  lastJob = { type: 'separate' }; gpuReason = '';
   sendSeparate(el.forceCpu.checked);
 };
 

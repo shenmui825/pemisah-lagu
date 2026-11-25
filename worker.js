@@ -70,7 +70,9 @@ async function createSession(eps) {
 
 const ready = () => (kind === 'm4' ? !!processor : !!session);
 
+const OLD_URLS = ['https://huggingface.co/adowu/htdemucs-6s-onnx/resolve/main/htdemucs_6s_fp16weights.onnx'];
 async function load(k, url, file, forceWasm) {
+  try { const c = await caches.open(CACHE); for (const u of OLD_URLS) await c.delete(u); } catch (e) {}
   if (k !== kind || url !== modelUrl || file) {
     processor = null; session = null; modelBuf = null;
     kind = k;
