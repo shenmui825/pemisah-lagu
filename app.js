@@ -1,6 +1,6 @@
 import { effectiveGains, mixDown, encodeWav, encodeMp3, peaks, fmtTime, safeName } from './audio-utils.js';
 
-const VERSION = 'v8';
+const VERSION = 'v9';
 const SR = 44100;
 const NAMES = { vocals: 'Vokal', drums: 'Dram', bass: 'Bass', guitar: 'Gitar', piano: 'Piano', other: 'Lain-lain' };
 const MODELS = {
@@ -26,6 +26,7 @@ const el = {
 let worker, workerBusy = false;
 let song = null;            // {left,right,name}
 let stems = null;           // [{left,right}] ikut urutan STEMS
+let raw = null, layout = '6'; // hasil mentah model + susunan stem
 let states = [];
 let ac = null, gains = [], buffers = [], sources = [];
 let playing = false, startAt = 0, offsetAt = 0, pos = 0, dur = 0;
@@ -161,15 +162,43 @@ el.sep.onclick = async () => {
 
 function finishSeparate(res) {
   workerBusy = false; releaseWake();
-  STEMS = MODELS[kind].keys.map(k => ({ key: k, name: NAMES[k] }));
-  stems = STEMS.map(s => res[s.key]);
+  raw = res; layout = '6';
+  document.querySelector('input[name=lay][value="6"]').checked = true;
+  $('#layoutRow').classList.toggle('hidden', kind !== 'm6');
+  applyLayout();
   setBar(null); setStatus('Siap. Mixer di bawah.');
   el.sep.disabled = false;
-  setupPlayer();
+  setupPlayer(true);
 }
 
+// Susun stem daripada hasil mentah. Susunan 5 stem: Gitar 1 = saluran kiri, Gitar 2 = saluran kanan
+// (hanya bermakna jika gitar dalam lagu itu di-pan kiri/kanan). Jumlah semua stem = asal.
+function applyLayout() {
+  if (kind === 'm6' && layout === '5') {
+    const n = raw.vocals.left.length, zero = new Float32Array(n);
+    const mixL = new Float32Array(n), mixR = new Float32Array(n);
+    for (const k of ['bass', 'piano', 'other']) {
+      const s = raw[k];
+      for (let i = 0; i < n; i++) { mixL[i] += s.left[i]; mixR[i] += s.right[i]; }
+    }
+    STEMS = [
+      { key: 'vocals', name: 'Vokal' }, { key: 'drums', name: 'Dram' },
+      { key: 'gitar1', name: 'Gitar 1 (kiri)' }, { key: 'gitar2', name: 'Gitar 2 (kanan)' },
+      { key: 'other', name: 'Lain-lain (bass, piano…)' },
+    ];
+    stems = [raw.vocals, raw.drums, { left: raw.guitar.left, right: zero }, { left: zero, right: raw.guitar.right }, { left: mixL, right: mixR }];
+  } else {
+    STEMS = MODELS[kind].keys.map(k => ({ key: k, name: NAMES[k] }));
+    stems = STEMS.map(s => raw[s.key]);
+  }
+}
+document.querySelectorAll('input[name=lay]').forEach(r => r.onchange = () => {
+  if (!raw) return;
+  stopPlayback(); layout = r.value; applyLayout(); setupPlayer(false);
+});
+
 // ---------- pemain ----------
-function setupPlayer() {
+function setupPlayer(scroll) {
   if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SR });
   gains.forEach(g => g.disconnect());
   gains = []; buffers = [];
@@ -187,7 +216,7 @@ function setupPlayer() {
   buildMixerUI(); applyGains(); updateLoopUI();
   $('#stemNote').classList.toggle('hidden', kind !== 'm4');
   el.player.classList.remove('hidden'); el.exp.classList.remove('hidden');
-  el.player.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (scroll) el.player.scrollIntoView({ behavior: 'smooth', block: 'start' });
   cancelAnimationFrame(raf); raf = requestAnimationFrame(tick);
 }
 
@@ -204,7 +233,7 @@ function buildMixerUI() {
     d.querySelector('input').oninput = e => { states[i].vol = +e.target.value; applyGains(); };
     el.stems.appendChild(d);
     const b = document.createElement('button');
-    b.textContent = s.name.split(' ')[0];
+    b.textContent = s.name.replace(/\s*\(.*$/, '');
     b.onclick = () => exportStem(i);
     el.stemBtns.appendChild(b);
   });
@@ -224,7 +253,10 @@ document.querySelectorAll('[data-p]').forEach(b => b.onclick = () => {
   const p = b.dataset.p;
   states.forEach(s => { s.mute = false; s.solo = false; });
   const idx = k => STEMS.findIndex(s => s.key === k);
-  if (p === 'nogtr') states[idx(idx('guitar') >= 0 ? 'guitar' : 'other')].mute = true;
+  if (p === 'nogtr') {
+    if (idx('gitar1') >= 0) { states[idx('gitar1')].mute = true; states[idx('gitar2')].mute = true; }
+    else states[idx(idx('guitar') >= 0 ? 'guitar' : 'other')].mute = true;
+  }
   if (p === 'novox') states[idx('vocals')].mute = true;
   if (p === 'nodrum') states[idx('drums')].mute = true;
   if (p === 'vox') states[idx('vocals')].solo = true;
