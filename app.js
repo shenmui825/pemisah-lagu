@@ -1,7 +1,7 @@
 import { detectChords, chordLabel, prefersFlats, segmentAt } from './chords.js';
 import { effectiveGains, mixDown, encodeWav, encodeMp3, peaks, fmtTime, safeName } from './audio-utils.js';
 
-const VERSION = 'v15';
+const VERSION = 'v16';
 const SR = 44100;
 const NAMES = { vocals: 'Vokal', drums: 'Dram', bass: 'Bass', guitar: 'Gitar', piano: 'Piano', other: 'Lain-lain' };
 const MODELS = {
@@ -12,7 +12,7 @@ const MODELS = {
   m4: { label: '4 stem', size: '172MB', url: 'https://huggingface.co/timcsy/demucs-web-onnx/resolve/main/htdemucs_embedded.onnx',
         keys: ['vocals', 'drums', 'bass', 'other'] },
 };
-let kind = 'm6f';
+let kind = 'm6';
 let STEMS = MODELS[kind].keys.map(k => ({ key: k, name: NAMES[k] }));
 const MODEL_URL = () => MODELS[kind].url;
 
