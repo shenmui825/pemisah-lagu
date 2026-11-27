@@ -1,4 +1,4 @@
-# Pemisah Lagu
+# StemJam
 
 Asingkan vokal, dram, bass dan lain-lain (gitar/piano) daripada lagu sendiri. Semua proses dalam pelayar/peranti, tiada server.
 
