@@ -14,6 +14,7 @@ export const TYPES = [
 const NT = TYPES.length;
 const NS = 12 * NT + 1;           // + keadaan "tiada chord"
 const NOCHORD = NS - 1;
+const PK_LO = 0.38, PK_HI = 0.48;   // ambang kepuncakan kromagram (solo)
 
 // templat ternormal L2 untuk setiap (root, jenis)
 const TEMPLATES = [];
@@ -175,6 +176,8 @@ export async function detectChords(left, right, sr, opts = {}) {
   // pas 3: Viterbi
   const medE = Array.from(energy).sort((a, b) => a - b)[Math.floor(frames / 2)];
   const BETA = 8, LAMBDA = opts.switchCost ?? 1.6, GAMMA = 0.12;
+  const guard = opts.soloGuard !== false;
+  const peaky = new Float32Array(frames);
   const emis = new Float32Array(NS);
   let score = new Float32Array(NS), next = new Float32Array(NS);
   const back = new Uint8Array(frames * NS);
@@ -188,7 +191,11 @@ export async function detectChords(left, right, sr, opts = {}) {
       let d = 0; for (let i = 0; i < 12; i++) d += cs[t * 12 + i] * tpl[i];
       emis[r * NT + ty] = d / cn + TYPES[ty].bonus + GAMMA * bass[t * 12 + r];
     }
+    // bahagian solo / garis melodi tunggal: satu kelas nada mendominasi kromagram
+    let l1 = 0, mx = 0; for (let i = 0; i < 12; i++) { l1 += cs[t * 12 + i]; if (cs[t * 12 + i] > mx) mx = cs[t * 12 + i]; }
+    peaky[t] = mx / (l1 + 1e-9);
     emis[NOCHORD] = energy[t] < 0.08 * medE ? 1.2 : 0.25;
+    if (guard && peaky[t] > PK_LO) emis[NOCHORD] += Math.min(1, (peaky[t] - PK_LO) / (PK_HI - PK_LO)) * 2.2;
     if (t === 0) { for (let s = 0; s < NS; s++) score[s] = BETA * emis[s]; continue; }
     let bi = 0; for (let s = 1; s < NS; s++) if (score[s] > score[bi]) bi = s;
     const sw = score[bi] - LAMBDA;
@@ -218,7 +225,7 @@ export async function detectChords(left, right, sr, opts = {}) {
   }
   if (segments.length) segments[segments.length - 1].end = total;
   onProgress(1);
-  return { segments, key: estimateKey(Array.from(prof)), duration: total, tuning };
+  return { segments, key: estimateKey(Array.from(prof)), duration: total, tuning, peaky };
 }
 
 /** Chord pada masa t (saat) → indeks segmen. */
