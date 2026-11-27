@@ -1,7 +1,7 @@
 import { detectChords, chordLabel, prefersFlats, segmentAt } from './chords.js';
 import { effectiveGains, mixDown, encodeWav, encodeMp3, peaks, fmtTime, safeName } from './audio-utils.js';
 
-const VERSION = 'v16';
+const VERSION = 'v17';
 const SR = 44100;
 const NAMES = { vocals: 'Vokal', drums: 'Dram', bass: 'Bass', guitar: 'Gitar', piano: 'Piano', other: 'Lain-lain' };
 const MODELS = {
@@ -55,7 +55,7 @@ let lastJob = null;       // untuk ulang dalam mod CPU
 let gpuReason = '';
 function sendSeparate(forceWasm) {
   const left = song.left.slice(), right = song.right.slice();
-  worker.postMessage({ type: 'separate', kind, url: MODEL_URL(), left, right, forceWasm }, [left.buffer, right.buffer]);
+  worker.postMessage({ type: 'separate', kind, url: MODEL_URL(), left, right, forceWasm, fast: $('#fastMode').checked }, [left.buffer, right.buffer]);
 }
 function retryCpu(reason) {
   gpuReason = reason;

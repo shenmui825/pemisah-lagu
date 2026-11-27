@@ -108,9 +108,9 @@ async function load(k, url, file, forceWasm) {
 }
 
 // ---- pemisahan 6 stem: overlap-add dengan tetingkap ----
-async function separate6(left, right) {
+async function separate6(left, right, fast) {
   const N = left.length;
-  const stride = Math.floor(T * 0.75);
+  const stride = Math.floor(T * (fast ? 0.95 : 0.75));
   const F = T - stride;                       // panjang pertindihan
   const win = new Float32Array(T);
   for (let i = 0; i < T; i++) win[i] = Math.min(1, (i + 1) / F, (T - i) / F);
@@ -153,9 +153,9 @@ async function separate6(left, right) {
   return res;
 }
 
-async function runSeparate(left, right) {
+async function runSeparate(left, right, fast) {
   try {
-    return await (kind !== 'm6' ? processor.separate(left, right) : separate6(left, right));
+    return await (kind !== 'm6' ? processor.separate(left, right) : separate6(left, right, fast));
   } catch (e) {
     if (provider === 'webgpu') { post({ type: 'needcpu', reason: 'larian WebGPU: ' + errText(e) }); return null; }
     throw new Error('Larian (' + provider + '): ' + errText(e));
@@ -174,7 +174,7 @@ self.onmessage = async ev => {
       if (!ready() || kind !== m.kind || (m.forceWasm && provider !== 'wasm')) {
         if (!(await load(m.kind, m.url, null, !!m.forceWasm))) return;
       }
-      const res = await runSeparate(m.left, m.right);
+      const res = await runSeparate(m.left, m.right, m.fast);
       if (!res) return;
       const out = {}, tr = [];
       for (const k of Object.keys(res)) {
