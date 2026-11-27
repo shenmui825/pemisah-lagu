@@ -1,7 +1,7 @@
 import { detectChords, chordLabel, prefersFlats, segmentAt } from './chords.js';
 import { effectiveGains, mixDown, encodeWav, encodeMp3, peaks, fmtTime, safeName } from './audio-utils.js';
 
-const VERSION = 'v12';
+const VERSION = 'v13';
 const SR = 44100;
 const NAMES = { vocals: 'Vokal', drums: 'Dram', bass: 'Bass', guitar: 'Gitar', piano: 'Piano', other: 'Lain-lain' };
 const MODELS = {
@@ -193,6 +193,21 @@ function finishSeparate(res) {
   $('#layoutRow').classList.toggle('hidden', !has6);
   applyLayout();
   setBar(null); setStatus('Siap. Gunakan mixer di bawah.');
+  // semakan kualiti: jumlah semua stem sepatutnya hampir sama dengan lagu asal
+  try {
+    const n = song.left.length; let sig = 0, err = 0;
+    for (let i = 0; i < n; i += 7) {
+      let sl = 0, sr = 0;
+      for (const k of MODELS[kind].keys) { sl += raw[k].left[i]; sr += raw[k].right[i]; }
+      sig += song.left[i] ** 2 + song.right[i] ** 2;
+      err += (song.left[i] - sl) ** 2 + (song.right[i] - sr) ** 2;
+    }
+    const snr = 10 * Math.log10((sig + 1e-12) / (err + 1e-12));
+    el.sepHint.dataset.snr = snr.toFixed(1);
+    if (snr < 10) {
+      showErr('Amaran: hasil pengasingan tak sepadan dengan lagu asal (padanan ' + snr.toFixed(1) + ' dB; biasanya >15 dB). Bunyi mungkin rosak/berdesir dengan model ini. Cuba model "6 stem (stabil)" di tab Tetapan, atau tick Paksa mod CPU.');
+    } else setStatus('Siap. Padanan stem ' + snr.toFixed(1) + ' dB (baik). Gunakan mixer di bawah.');
+  } catch (e) {}
   setupPlayer(false, pos);
   setSepState();
   if (chords) runChords(true);
