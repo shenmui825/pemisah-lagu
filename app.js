@@ -1,6 +1,7 @@
+import { detectChords, chordLabel, prefersFlats, segmentAt } from './chords.js';
 import { effectiveGains, mixDown, encodeWav, encodeMp3, peaks, fmtTime, safeName } from './audio-utils.js';
 
-const VERSION = 'v11';
+const VERSION = 'v12';
 const SR = 44100;
 const NAMES = { vocals: 'Vokal', drums: 'Dram', bass: 'Bass', guitar: 'Gitar', piano: 'Piano', other: 'Lain-lain' };
 const MODELS = {
@@ -17,17 +18,20 @@ const MODEL_URL = () => MODELS[kind].url;
 
 const $ = s => document.querySelector(s);
 const el = {
-  file: $('#file'), pick: $('#btnPick'), drop: $('#drop'), info: $('#fileInfo'), sep: $('#btnSep'),
+  file: $('#file'), pick: $('#btnPick'), sep: $('#btnSep'), sepHint: $('#sepHint'),
   barWrap: $('#barWrap'), bar: $('#bar'), status: $('#status'), err: $('#err'),
   modelInfo: $('#modelInfo'), modelFile: $('#modelFile'), btnModelFile: $('#btnModelFile'), forceCpu: $('#forceCpu'),
-  player: $('#cardPlayer'), exp: $('#cardExport'), wave: $('#wave'), tNow: $('#tNow'), tTot: $('#tTot'), tLoop: $('#tLoop'),
-  play: $('#btnPlay'), stop: $('#btnStop'), A: $('#btnA'), B: $('#btnB'), loop: $('#btnLoop'), clr: $('#btnClr'),
+  wave: $('#wave'), tNow: $('#tNow'), tTot: $('#tTot'), tLoop: $('#tLoop'),
+  play: $('#btnPlay'), back: $('#btnBack'), fwd: $('#btnFwd'), A: $('#btnA'), B: $('#btnB'), loop: $('#btnLoop'), clr: $('#btnClr'),
   stems: $('#stems'), stemBtns: $('#stemBtns'), mp3: $('#btnMp3'), wav: $('#btnWav'), expStatus: $('#expStatus'),
+  songName: $('#songName'), songSub: $('#songSub'), mixCard: $('#mixCard'),
+  strip: $('#strip'), keyInfo: $('#keyInfo'), trVal: $('#trVal'),
+  btnChord: $('#btnChord'), cBarWrap: $('#cBarWrap'), cBar: $('#cBar'), chordStatus: $('#chordStatus'), chordList: $('#chordList'), chordSrc: $('#chordSrc'),
 };
 
 let worker, workerBusy = false;
 let song = null;            // {left,right,name}
-let stems = null;           // [{left,right}] ikut urutan STEMS
+let stems = null;           // [{left,right}] trek yang dimainkan (lagu asal atau stem)
 let raw = null, layout = '6'; // hasil mentah model + susunan stem
 let states = [];
 let ac = null, gains = [], buffers = [], sources = [];
@@ -74,7 +78,7 @@ const friendly = m => {
 function startWorker() {
   worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
   worker.onmessage = onWorker;
-  worker.onerror = e => { workerBusy = false; showErr('Ralat worker: ' + (e.message || 'tidak diketahui')); el.sep.disabled = !song; };
+  worker.onerror = e => { workerBusy = false; showErr('Ralat worker: ' + (e.message || 'tidak diketahui')); setSepState(); };
   checkCached();
 }
 function checkCached() { worker.postMessage({ type: 'check', url: MODEL_URL() }); }
@@ -111,7 +115,7 @@ function onWorker(ev) {
     case 'error':
       workerBusy = false; setBar(null); setStatus('');
       showErr('Ralat: ' + friendly(m.message));
-      el.sep.disabled = !song;
+      setSepState();
       releaseWake();
       break;
   }
@@ -130,19 +134,25 @@ async function loadFile(f) {
     const left = buf.getChannelData(0).slice();
     const right = (buf.numberOfChannels > 1 ? buf.getChannelData(1) : buf.getChannelData(0)).slice();
     song = { left, right, name: f.name, seconds: buf.length / buf.sampleRate };
-    el.info.textContent = f.name + ' · ' + fmtTime(song.seconds) + (song.seconds > 600 ? ' (lagu panjang, memori mungkin tak cukup di telefon)' : '');
-    el.sep.disabled = false;
+    raw = null; chords = null; tr = 0; layout = '6';
+    el.songName.textContent = f.name.replace(/\.[^.]+$/, '');
+    el.songSub.textContent = fmtTime(song.seconds) + (song.seconds > 600 ? ' · lagu panjang, memori telefon mungkin tak cukup' : '');
+    STEMS = [{ key: 'mix', name: 'Lagu asal' }];
+    stems = [{ left, right }];
+    setupPlayer(false);
+    renderChords(); renderChordList();
+    el.btnChord.disabled = false; el.chordStatus.textContent = 'Tekan “Kesan chord”.'; el.chordSrc.textContent = '';
+    setSepState();
     setStatus('');
   } catch (e) {
-    song = null; el.sep.disabled = true; setStatus('');
+    setStatus('');
     showErr('Tak dapat baca fail audio ini. Cuba MP3/WAV/M4A lain.');
   }
 }
 el.pick.onclick = () => el.file.click();
-el.file.onchange = () => loadFile(el.file.files[0]);
-['dragenter', 'dragover'].forEach(t => el.drop.addEventListener(t, e => { e.preventDefault(); el.drop.classList.add('over'); }));
-['dragleave', 'drop'].forEach(t => el.drop.addEventListener(t, e => { e.preventDefault(); el.drop.classList.remove('over'); }));
-el.drop.addEventListener('drop', e => loadFile(e.dataTransfer.files[0]));
+el.file.onchange = () => { stopPlayback(); loadFile(el.file.files[0]); };
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer.files[0]) { stopPlayback(); loadFile(e.dataTransfer.files[0]); } });
 
 el.btnModelFile.onclick = () => el.modelFile.click();
 el.modelFile.onchange = () => {
@@ -157,31 +167,41 @@ el.modelFile.onchange = () => {
 async function takeWake() { try { wake = await navigator.wakeLock?.request('screen'); } catch (e) {} }
 function releaseWake() { try { wake?.release(); } catch (e) {} wake = null; }
 
+function setSepState() {
+  el.sep.disabled = !song || workerBusy;
+  el.sepHint.textContent = !song ? 'Pilih lagu dahulu.' : raw ? 'Sudah diasingkan. Tekan lagi untuk ulang.' : 'Lagu sedia. ' + MODELS[kind].label + ' akan digunakan.';
+  el.mp3.disabled = el.wav.disabled = !stems;
+  $('#saveHint').classList.toggle('hidden', !!raw || !stems);
+}
+
 el.sep.onclick = async () => {
   if (!song || workerBusy) return;
+  const keepPos = curPos();
   stopPlayback(); showErr('');
-  workerBusy = true; el.sep.disabled = true;
+  workerBusy = true; setSepState();
   setBar(0); setStatus('Bermula…');
   await takeWake();
   lastJob = { type: 'separate' }; gpuReason = ''; tStart = Date.now();
   sendSeparate(el.forceCpu.checked);
+  pos = keepPos;
 };
 
 function finishSeparate(res) {
   workerBusy = false; releaseWake();
   raw = res; layout = '6';
-  document.querySelector('input[name=lay][value="6"]').checked = true;
-  $('#layoutRow').classList.toggle('hidden', !MODELS[kind].keys.includes('guitar'));
+  const has6 = MODELS[kind].keys.includes('guitar');
+  $('#layoutRow').classList.toggle('hidden', !has6);
   applyLayout();
-  setBar(null); setStatus('Siap. Mixer di bawah.');
-  el.sep.disabled = false;
-  setupPlayer(true);
+  setBar(null); setStatus('Siap. Gunakan mixer di bawah.');
+  setupPlayer(false, pos);
+  setSepState();
+  if (chords) runChords(true);
 }
 
-// Susun stem daripada hasil mentah. Susunan 5 stem: Gitar 1 = saluran kiri, Gitar 2 = saluran kanan
-// (hanya bermakna jika gitar dalam lagu itu di-pan kiri/kanan). Jumlah semua stem = asal.
+// Susunan 5 stem: Gitar 1 = saluran kiri, Gitar 2 = saluran kanan (hanya bermakna jika gitar di-pan). Jumlah semua stem = asal.
 function applyLayout() {
-  if (MODELS[kind].keys.includes('guitar') && layout === '5') {
+  const has6 = MODELS[kind].keys.includes('guitar');
+  if (has6 && layout === '5') {
     const n = raw.vocals.left.length, zero = new Float32Array(n);
     const mixL = new Float32Array(n), mixR = new Float32Array(n);
     for (const k of ['bass', 'piano', 'other']) {
@@ -198,14 +218,19 @@ function applyLayout() {
     STEMS = MODELS[kind].keys.map(k => ({ key: k, name: NAMES[k] }));
     stems = STEMS.map(s => raw[s.key]);
   }
+  document.querySelectorAll('[data-lay]').forEach(b => b.classList.toggle('on', b.dataset.lay === layout));
+  $('#stemNote').classList.toggle('hidden', has6);
+  $('#layNote').classList.toggle('hidden', !(has6 && layout === '5'));
 }
-document.querySelectorAll('input[name=lay]').forEach(r => r.onchange = () => {
-  if (!raw) return;
-  stopPlayback(); layout = r.value; applyLayout(); setupPlayer(false);
+document.querySelectorAll('[data-lay]').forEach(b => b.onclick = () => {
+  if (!raw || layout === b.dataset.lay) return;
+  const p = curPos(), was = playing; stopPlayback(); layout = b.dataset.lay; applyLayout(); setupPlayer(false, p);
+  if (was) play();
 });
 
 // ---------- pemain ----------
-function setupPlayer(scroll) {
+const ICONS = { vocals: '🎤', drums: '🥁', bass: '🎸', guitar: '🎸', gitar1: '🎸', gitar2: '🎸', piano: '🎹', other: '🎶', mix: '🎵' };
+function setupPlayer(scroll, keepPos = 0) {
   if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SR });
   gains.forEach(g => g.disconnect());
   gains = []; buffers = [];
@@ -215,16 +240,17 @@ function setupPlayer(scroll) {
     b.copyToChannel(s.left, 0); b.copyToChannel(s.right, 1);
     return b;
   });
-  dur = stems[0].left.length / SR; pos = 0; loopA = loopB = null; loopOn = false;
+  const first = !dur || Math.abs(dur - stems[0].left.length / SR) > 0.5;
+  dur = stems[0].left.length / SR; pos = Math.min(keepPos, dur);
+  if (first) { loopA = loopB = null; loopOn = false; }
   states = STEMS.map(() => ({ vol: 1, mute: false, solo: false }));
   const all = mixDown(stems, states.map(() => 1));
   peakData = peaks(all.left, all.right, 800);
   el.tTot.textContent = fmtTime(dur);
   buildMixerUI(); applyGains(); updateLoopUI();
-  $('#stemNote').classList.toggle('hidden', MODELS[kind].keys.includes('guitar'));
-  el.player.classList.remove('hidden'); el.exp.classList.remove('hidden');
-  if (scroll) el.player.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  el.mixCard.classList.remove('hidden');
   cancelAnimationFrame(raf); raf = requestAnimationFrame(tick);
+  setSepState();
 }
 
 function buildMixerUI() {
@@ -233,16 +259,21 @@ function buildMixerUI() {
   STEMS.forEach((s, i) => {
     const d = document.createElement('div');
     d.className = 'stem';
-    d.innerHTML = `<span class="nm">${s.name}</span><button data-m>Bisu</button><button data-s>Solo</button>
-      <input type="range" min="0" max="1.5" step="0.01" value="1" aria-label="Kelantangan ${s.name}">`;
-    d.querySelector('[data-m]').onclick = e => { states[i].mute = !states[i].mute; applyGains(); };
-    d.querySelector('[data-s]').onclick = e => { states[i].solo = !states[i].solo; applyGains(); };
+    d.innerHTML = `<button class="ic" data-m aria-label="Bisu ${s.name}">${ICONS[s.key] || '🎶'}</button>
+      <div class="mid"><div class="nm">${s.name}</div><input type="range" min="0" max="1.5" step="0.01" value="1" aria-label="Kelantangan ${s.name}"></div>
+      <button class="s" data-s>S</button>
+      <button class="dl" data-d aria-label="Simpan ${s.name}">⬇</button>`;
+    d.querySelector('[data-m]').onclick = () => { states[i].mute = !states[i].mute; applyGains(); };
+    d.querySelector('[data-s]').onclick = () => { states[i].solo = !states[i].solo; applyGains(); };
+    d.querySelector('[data-d]').onclick = () => exportStem(i);
     d.querySelector('input').oninput = e => { states[i].vol = +e.target.value; applyGains(); };
     el.stems.appendChild(d);
-    const b = document.createElement('button');
-    b.textContent = s.name.replace(/\s*\(.*$/, '');
-    b.onclick = () => exportStem(i);
-    el.stemBtns.appendChild(b);
+    if (raw) {
+      const b = document.createElement('button');
+      b.textContent = s.name.replace(/\s*\(.*$/, '');
+      b.onclick = () => exportStem(i);
+      el.stemBtns.appendChild(b);
+    }
   });
 }
 
@@ -250,13 +281,13 @@ function applyGains() {
   const g = effectiveGains(states);
   g.forEach((v, i) => { if (gains[i]) gains[i].gain.value = v; });
   [...el.stems.children].forEach((d, i) => {
-    d.classList.toggle('muted', g[i] === 0);
-    d.querySelector('[data-m]').classList.toggle('on', states[i].mute);
+    d.querySelector('[data-m]').classList.toggle('off', g[i] === 0);
     d.querySelector('[data-s]').classList.toggle('on', states[i].solo);
   });
 }
 
 document.querySelectorAll('[data-p]').forEach(b => b.onclick = () => {
+  if (!raw) return;
   const p = b.dataset.p;
   states.forEach(s => { s.mute = false; s.solo = false; });
   const idx = k => STEMS.findIndex(s => s.key === k);
@@ -268,6 +299,7 @@ document.querySelectorAll('[data-p]').forEach(b => b.onclick = () => {
   if (p === 'nodrum') states[idx('drums')].mute = true;
   if (p === 'vox') states[idx('vocals')].solo = true;
   applyGains();
+  document.querySelectorAll('.stem input').forEach((r, i) => r.value = states[i].vol);
 });
 
 function curPos() {
@@ -302,15 +334,15 @@ async function play() {
   await ac.resume();
   if (pos >= dur - 0.05) pos = 0;
   startSources(pos);
-  playing = true; el.play.textContent = '⏸ Jeda';
+  playing = true; el.play.textContent = '⏸';
 }
 function pause() {
   if (!playing) return;
-  pos = curPos(); playing = false; stopSources(); el.play.textContent = '▶ Main';
+  pos = curPos(); playing = false; stopSources(); el.play.textContent = '▶';
 }
 function stopPlayback() {
-  if (playing) { playing = false; stopSources(); }
-  pos = 0; el.play.textContent = '▶ Main';
+  if (playing) { pos = curPos(); playing = false; stopSources(); }
+  el.play.textContent = '▶';
 }
 function seek(t) {
   pos = Math.max(0, Math.min(dur, t));
@@ -318,9 +350,10 @@ function seek(t) {
 }
 
 el.play.onclick = () => (playing ? pause() : play());
-el.stop.onclick = () => stopPlayback();
-el.A.onclick = () => { loopA = curPos(); if (loopB != null && loopB <= loopA) loopB = null; updateLoopUI(); };
-el.B.onclick = () => { loopB = curPos(); if (loopA == null || loopB <= loopA) { loopB = null; } updateLoopUI(); };
+el.back.onclick = () => stems && seek(curPos() - 10);
+el.fwd.onclick = () => stems && seek(curPos() + 10);
+el.A.onclick = () => { if (!stems) return; loopA = curPos(); if (loopB != null && loopB <= loopA) loopB = null; updateLoopUI(); };
+el.B.onclick = () => { if (!stems) return; loopB = curPos(); if (loopA == null || loopB <= loopA) { loopB = null; } updateLoopUI(); };
 el.loop.onclick = () => {
   if (loopA == null || loopB == null) return;
   loopOn = !loopOn; updateLoopUI();
@@ -329,17 +362,18 @@ el.loop.onclick = () => {
 el.clr.onclick = () => { loopA = loopB = null; loopOn = false; updateLoopUI(); if (playing) { pos = curPos(); startSources(pos); } };
 function updateLoopUI() {
   el.loop.classList.toggle('on', loopOn);
+  el.A.classList.toggle('on', loopA != null);
+  el.B.classList.toggle('on', loopB != null);
   el.tLoop.textContent = loopA != null ? 'A ' + fmtTime(loopA) + (loopB != null ? '  →  B ' + fmtTime(loopB) : '') : '';
 }
 
 // ---------- gelombang ----------
 const ctx2d = el.wave.getContext('2d');
-function seekFromEvent(e) {
+el.wave.addEventListener('pointerdown', e => {
+  if (!stems) return;
   const r = el.wave.getBoundingClientRect();
   seek(((e.clientX - r.left) / r.width) * dur);
-}
-el.wave.addEventListener('pointerdown', e => { if (stems) seekFromEvent(e); });
-
+});
 function draw() {
   const W = el.wave.width, H = el.wave.height;
   ctx2d.clearRect(0, 0, W, H);
@@ -357,15 +391,87 @@ function draw() {
   }
   ctx2d.fillStyle = '#fff'; ctx2d.fillRect(px - 1, 0, 2, H);
 }
+let lastSeg = -2;
 function tick() {
   if (stems) {
     const t = curPos();
-    if (playing && t >= dur - 0.02 && !(loopOn)) { pos = 0; playing = false; stopSources(); el.play.textContent = '▶ Main'; }
+    if (playing && t >= dur - 0.02 && !loopOn) { pos = 0; playing = false; stopSources(); el.play.textContent = '▶'; }
     el.tNow.textContent = fmtTime(playing ? t : pos);
     draw();
+    if (chords?.segments.length) {
+      const si = segmentAt(chords.segments, playing ? t : pos);
+      if (si !== lastSeg) { lastSeg = si; highlightChord(si); }
+    }
   }
   raf = requestAnimationFrame(tick);
 }
+
+// ---------- chord ----------
+let chords = null, tr = 0;
+const flatsNow = () => chords ? prefersFlats(((chords.key.tonic + tr) % 12 + 12) % 12, chords.key.mode) : false;
+const segLabel = s => chordLabel(s, tr, flatsNow());
+function renderChords() {
+  lastSeg = -2;
+  el.trVal.textContent = tr === 0 ? '±0' : (tr > 0 ? '+' : '') + tr;
+  if (!chords || !chords.segments.length) {
+    el.strip.innerHTML = '<div class="empty">' + (chords ? 'Tiada chord jelas dikesan.' : 'Pilih lagu, kemudian tab <b>Chord</b> → “Kesan chord”.') + '</div>';
+    el.keyInfo.textContent = 'Chord · belum dikesan';
+    return;
+  }
+  const kn = chordLabel({ root: (chords.key.tonic + tr) % 12, type: chords.key.mode === 'min' ? 1 : 0 }, 0, flatsNow());
+  el.keyInfo.innerHTML = 'Kunci dianggar: <b>' + kn.replace(/m$/, ' minor').replace(/^([A-G][b#]?)$/, '$1 major') + '</b>';
+  el.strip.innerHTML = '';
+  chords.segments.forEach((s, i) => {
+    const d = document.createElement('div');
+    d.className = 'cc' + (s.type < 0 ? ' nc' : '');
+    d.innerHTML = segLabel(s) + '<small>' + fmtTime(s.start) + '</small>';
+    d.onclick = () => seek(s.start);
+    el.strip.appendChild(d);
+  });
+}
+function renderChordList() {
+  el.chordList.innerHTML = '';
+  if (!chords) return;
+  chords.segments.forEach((s, i) => {
+    const b = document.createElement('button');
+    b.innerHTML = segLabel(s) + '<small>' + fmtTime(s.start) + '</small>';
+    b.onclick = () => seek(s.start);
+    el.chordList.appendChild(b);
+  });
+}
+function highlightChord(si) {
+  const cells = el.strip.children;
+  for (let i = 0; i < cells.length; i++) cells[i].classList.toggle('cur', i === si);
+  const c = cells[si];
+  if (c && c.classList) el.strip.scrollTo({ left: c.offsetLeft - el.strip.clientWidth / 2 + c.offsetWidth / 2 - el.strip.offsetLeft, behavior: 'smooth' });
+  [...el.chordList.children].forEach((b, i) => b.classList.toggle('cur', i === si));
+}
+$('#trUp').onclick = () => { tr = (tr + 1 + 12) % 12; if (tr > 6) tr -= 12; renderChords(); renderChordList(); };
+$('#trDn').onclick = () => { tr = tr - 1; if (tr < -6) tr += 12; renderChords(); renderChordList(); };
+
+let chordBusy = false;
+async function runChords(auto) {
+  if (!song || chordBusy) return;
+  chordBusy = true; el.btnChord.disabled = true;
+  el.cBarWrap.classList.remove('hidden'); el.cBar.style.width = '0%';
+  let L, R, src;
+  if (raw) {
+    const ks = MODELS[kind].keys.filter(k => k !== 'vocals' && k !== 'drums');
+    L = new Float32Array(raw.vocals.left.length); R = new Float32Array(L.length);
+    for (const k of ks) { const s = raw[k]; for (let i = 0; i < L.length; i++) { L[i] += s.left[i]; R[i] += s.right[i]; } }
+    src = 'sumber: stem harmonik (tanpa dram & vokal)';
+  } else { L = song.left; R = song.right; src = 'sumber: lagu asal'; }
+  el.chordStatus.textContent = 'Mengesan chord…'; el.chordSrc.textContent = src;
+  try {
+    const r = await detectChords(L, R, SR, { onProgress: p => { el.cBar.style.width = Math.round(p * 100) + '%'; } });
+    chords = r; tr = 0;
+    renderChords(); renderChordList();
+    el.chordStatus.textContent = r.segments.length + ' perubahan chord dikesan. Ketepatan sederhana: semak dengan telinga, terutama chord 7th. Gunakan − / + untuk transpose.';
+  } catch (e) { el.chordStatus.textContent = 'Gagal kesan chord: ' + e.message; }
+  chordBusy = false; el.btnChord.disabled = !song;
+  setTimeout(() => el.cBarWrap.classList.add('hidden'), 600);
+}
+el.btnChord.onclick = () => runChords(false);
 
 // ---------- eksport ----------
 function download(blob, name) {
@@ -397,6 +503,12 @@ function exportStem(i) {
 }
 el.mp3.onclick = () => exportMix('mp3');
 el.wav.onclick = () => exportMix('wav');
+
+// ---------- tab ----------
+document.querySelectorAll('.tabs [data-tab]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.tabs [data-tab]').forEach(x => x.classList.toggle('on', x === b));
+  ['mix', 'chord', 'save', 'set'].forEach(t => $('#p-' + t).classList.toggle('hidden', t !== b.dataset.tab));
+});
 
 // ---------- mula ----------
 $('#ver').textContent = VERSION;
