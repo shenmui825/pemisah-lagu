@@ -151,14 +151,8 @@ canvas{width:100%;height:78px;display:block;background:var(--bg);border-radius:1
   <!-- CHORD -->
   <div class="pane hidden" id="p-chord">
     <div class="card">
-      <h2>Kesan chord daripada lagu</h2>
-      <div class="row">
-        <button class="pri" id="btnChord" disabled>Kesan chord</button>
-        <span class="dim" id="chordSrc"></span>
-      </div>
-      <div class="bar hidden" id="cBarWrap"><i id="cBar"></i></div>
-      <div class="dim" id="chordStatus" style="margin-top:8px">Untuk lagu sahaja: bahagian solo gitar / garis melodi tunggal ditanda N.C. (tiada chord). Boleh terus tanpa asingkan. Jika sudah diasingkan, chord dikesan daripada bass, gitar, piano &amp; lain-lain sahaja (tanpa dram dan vokal) — lebih tepat.</div>
-      <div class="list" id="chordList"></div>
+      <button class="pri" id="btnChord" disabled style="width:100%;padding:14px;font-size:16px">Kesan chord</button>
+      <div class="hidden"><div id="cBarWrap"><i id="cBar"></i></div><span id="chordSrc"></span><div id="chordStatus"></div><div id="chordList"></div></div>
     </div>
   </div>
 
@@ -208,6 +202,6 @@ canvas{width:100%;height:78px;display:block;background:var(--bg);border-radius:1
   <button data-tab="set"><i>⚙️</i>Tetapan</button>
 </div></nav>
 <script src="lib/lame.min.js"></script>
-<script type="module" src="app.js?v=14"></script>
+<script type="module" src="app.js?v=15"></script>
 </body>
 </html>

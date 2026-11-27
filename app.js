@@ -1,7 +1,7 @@
 import { detectChords, chordLabel, prefersFlats, segmentAt } from './chords.js';
 import { effectiveGains, mixDown, encodeWav, encodeMp3, peaks, fmtTime, safeName } from './audio-utils.js';
 
-const VERSION = 'v14';
+const VERSION = 'v15';
 const SR = 44100;
 const NAMES = { vocals: 'Vokal', drums: 'Dram', bass: 'Bass', guitar: 'Gitar', piano: 'Piano', other: 'Lain-lain' };
 const MODELS = {
@@ -468,7 +468,7 @@ let chordBusy = false;
 async function runChords(auto) {
   if (!song || chordBusy) return;
   chordBusy = true; el.btnChord.disabled = true;
-  el.cBarWrap.classList.remove('hidden'); el.cBar.style.width = '0%';
+  el.btnChord.textContent = 'Mengesan… 0%';
   let L, R, src;
   if (raw) {
     const ks = MODELS[kind].keys.filter(k => k !== 'vocals' && k !== 'drums');
@@ -478,13 +478,13 @@ async function runChords(auto) {
   } else { L = song.left; R = song.right; src = 'sumber: lagu asal'; }
   el.chordStatus.textContent = 'Mengesan chord…'; el.chordSrc.textContent = src;
   try {
-    const r = await detectChords(L, R, SR, { onProgress: p => { el.cBar.style.width = Math.round(p * 100) + '%'; } });
+    const r = await detectChords(L, R, SR, { onProgress: p => { el.btnChord.textContent = 'Mengesan… ' + Math.round(p * 100) + '%'; } });
     chords = r; tr = 0;
     renderChords(); renderChordList();
     el.chordStatus.textContent = r.segments.length + ' perubahan chord dikesan. Ketepatan sederhana: semak dengan telinga, terutama chord 7th. Gunakan − / + untuk transpose.';
   } catch (e) { el.chordStatus.textContent = 'Gagal kesan chord: ' + e.message; }
   chordBusy = false; el.btnChord.disabled = !song;
-  setTimeout(() => el.cBarWrap.classList.add('hidden'), 600);
+  el.btnChord.textContent = 'Kesan chord';
 }
 el.btnChord.onclick = () => runChords(false);
 
