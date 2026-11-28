@@ -1,7 +1,7 @@
 import { detectChords, chordLabel, prefersFlats, segmentAt } from './chords.js';
 import { effectiveGains, mixDown, encodeWav, encodeMp3, peaks, fmtTime, safeName } from './audio-utils.js';
 
-const VERSION = 'v19';
+const VERSION = 'v20';
 const SR = 44100;
 const NAMES = { vocals: 'Vokal', drums: 'Dram', bass: 'Bass', guitar: 'Gitar', piano: 'Piano', other: 'Lain-lain' };
 const MODELS = {
@@ -216,7 +216,15 @@ function finishSeparate(res) {
 // Susunan 5 stem: Gitar 1 = saluran kiri, Gitar 2 = saluran kanan (hanya bermakna jika gitar di-pan). Jumlah semua stem = asal.
 function applyLayout() {
   const has6 = MODELS[kind].keys.includes('guitar');
-  if (has6 && layout === '5') {
+  if (has6 && layout === '7') {
+    const n = raw.vocals.left.length, zero = new Float32Array(n);
+    STEMS = [
+      { key: 'vocals', name: 'Vokal' }, { key: 'drums', name: 'Dram' }, { key: 'bass', name: 'Bass' },
+      { key: 'gitar1', name: 'Gitar 1 (kiri)' }, { key: 'gitar2', name: 'Gitar 2 (kanan)' },
+      { key: 'piano', name: 'Piano' }, { key: 'other', name: 'Lain-lain' },
+    ];
+    stems = [raw.vocals, raw.drums, raw.bass, { left: raw.guitar.left, right: zero }, { left: zero, right: raw.guitar.right }, raw.piano, raw.other];
+  } else if (has6 && layout === '5') {
     const n = raw.vocals.left.length, zero = new Float32Array(n);
     const mixL = new Float32Array(n), mixR = new Float32Array(n);
     for (const k of ['bass', 'piano', 'other']) {
@@ -235,7 +243,7 @@ function applyLayout() {
   }
   document.querySelectorAll('[data-lay]').forEach(b => b.classList.toggle('on', b.dataset.lay === layout));
   $('#stemNote').classList.toggle('hidden', has6);
-  $('#layNote').classList.toggle('hidden', !(has6 && layout === '5'));
+  $('#layNote').classList.toggle('hidden', !(has6 && (layout === '5' || layout === '7')));
 }
 document.querySelectorAll('[data-lay]').forEach(b => b.onclick = () => {
   if (!raw || layout === b.dataset.lay) return;
